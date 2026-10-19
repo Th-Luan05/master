@@ -6,6 +6,7 @@
 #include <math.h>
 #include <time.h>
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "esp_mac.h"
 #include "nvs_flash.h"
 #include "esp_event.h"
@@ -37,8 +38,8 @@
 #include "proto.h"
 
 // 1. Cấu hình Wi-Fi
-#define WIFI_SSID           "Pi"
-#define WIFI_PASS           "12356789"
+#define WIFI_SSID           "Hoi Chu Tro"
+#define WIFI_PASS           "bodeocho"
 #define WIFI_CONNECTED_BIT  BIT0
 
 // 2. Cấu hình EMQX qua Cloudflare Tunnel WSS
@@ -114,6 +115,30 @@ static uint32_t now_ms(void) {
 
 static bool bytes_is(const char *p, int len, const char *s) {
     return len == (int)strlen(s) && memcmp(p, s, len) == 0;
+}
+
+static void log_memory_usage(void) {
+    size_t free_heap = esp_get_free_heap_size();
+    size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+
+    ESP_LOGI(TAG, "RAM heap: free=%u bytes (%u KB), min=%u bytes, internal=%u bytes, largest=%u bytes",
+             (unsigned)free_heap,
+             (unsigned)(free_heap / 1024),
+             (unsigned)esp_get_minimum_free_heap_size(),
+             (unsigned)internal_free,
+             (unsigned)largest_block);
+
+    TaskStatus_t tasks[32];
+    UBaseType_t task_count = uxTaskGetSystemState(tasks, 32, NULL);
+    ESP_LOGI(TAG, "Task memory usage: %u task(s)", (unsigned)task_count);
+    for (UBaseType_t i = 0; i < task_count; i++) {
+        size_t stack_free = tasks[i].usStackHighWaterMark * sizeof(StackType_t);
+        ESP_LOGI(TAG, "  task=%-16s priority=%u stack_free_min=%u bytes",
+                 tasks[i].pcTaskName,
+                 (unsigned)tasks[i].uxCurrentPriority,
+                 (unsigned)stack_free);
+    }
 }
 
 /* ======================================================================
@@ -757,8 +782,14 @@ static void rule_fire(int id, const uint8_t *target, bool on) {
 }
 
 static void automation_task(void *arg) {
+    int memory_log_counter = 0;
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
+
+        if (++memory_log_counter >= 60) {
+            memory_log_counter = 0;
+            log_memory_usage();
+        }
 
         bool tv = time_valid();
         struct tm tm = {0};
@@ -1365,4 +1396,5 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "Khoi dong MQTT Client WSS...");
     mqtt_app_start();
+    log_memory_usage();
 }
